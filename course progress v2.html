@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<!-- saved from url=(0077)file:///C:/Users/jcooper2/Downloads/progress_auto_rr_taller_labels%20(1).html -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Course Progress (Auto RR=1pt + Taller + Labels)</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style id="plotly.js-style-global"></style>
+  <style>
+    html, body { max-width: 100%; overflow-x: hidden; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding: 16px; }
+    .controls-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px 20px; }
+    .row { margin: 8px 0; }
+    .tiny { font-size: 12px; color: #555; }
+    fieldset { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; }
+    legend { padding: 0 6px; }
+    .btns { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ccc; background: #f6f6f6; cursor: pointer; }
+    button:hover { background: #eee; }
+    /* Taller graph area: more vertical inches, same zoom */
+    #progressGraph { width: 560px; height: 1100px; max-width: 100%; }
+    label.checkbox { display: flex; align-items: flex-start; gap: 8px; white-space: normal; }
+    input[type="checkbox"] { transform: scale(1.15); margin-top: 2px; }
+    input[type="number"] { width: 120px; padding: 6px; }
+    input[type="range"] { width: 160px; }
+    .inline { display: inline-flex; align-items: center; gap: 8px; }
+    .swatch { display:inline-block; width:14px; height:14px; border:1px solid #999; }
+  </style>
+</head>
+<body>
+  <h2>Course Progress</h2>
+
+  <div class="row">
+    <label for="pointsInput">Enter your earned points:</label>
+    <input type="number" id="pointsInput" min="0" step="1" oninput="updateGraph()">
+  </div>
+
+  <fieldset>
+    <legend>Include Assignments</legend>
+    <div class="controls-grid" id="checkboxContainer"></div>
+    <div class="btns">
+      <button type="button" onclick="selectAll()">Select all</button>
+      <button type="button" onclick="clearAll()">Clear all</button>
+      <button type="button" onclick="updateGraph()">Update graph</button>
+      <button type="button" id="defaultsBtn" aria-pressed="false" onclick="showCourseDefaults()">Restore course defaults</button>
+    </div>
+    <div class="tiny" id="rr_status">Reading Responses (remaining): 12 × 1 pt = 12 pts available</div>
+  </fieldset>
+  <fieldset>
+    <legend>Estimate Your Test Performance</legend>
+    <div class="controls-grid">
+      <!--
+      <div class="row">
+        
+        <div class="inline">
+          <strong>Test 1:</strong>
+          slider intentionally commented out to estimate grade using number input only
+          &lt;input type="range" id="pct_Test_1" min="0" max="100" step="5" value="100" oninput="syncPct('Test 1')"&gt;
+          number input for Test 1 intentionally commented out per request
+          &lt;input type="number" id="num_Test_1" min="0" max="100" step="1" value="100" oninput="syncPct('Test 1')"&gt;%
+        </div>
+        <div class="tiny" id="note_Test_1">Estimated points from Test 1: 52.0 / 52</div>
+      </div>
+      -->
+      <!--
+      <div class="row">
+        <div class="inline">
+          <strong>Test 2:</strong>
+          slider intentionally commented out to estimate grade using number input only
+          &lt;input type="range" id="pct_Test_2" min="0" max="100" step="5" value="100" oninput="syncPct('Test 2')"&gt;
+          number input for Test 2 intentionally commented out per request
+          &lt;input type="number" id="num_Test_2" min="0" max="100" step="1" value="100" oninput="syncPct('Test 2')"&gt;%
+        </div>
+        <div class="tiny" id="note_Test_2">Estimated points from Test 2: 52.0 / 52</div>
+      </div>
+      -->
+      <div class="row">
+      
+        <div class="inline">
+          <strong>Test 3:</strong>
+          <input type="range" id="pct_Test_3" min="0" max="100" step="5" value="100" oninput="syncPct('Test 3')">
+          <input type="number" id="num_Test_3" min="0" max="100" step="1" value="100" oninput="syncPct('Test 3')">%
+        </div>
+        <div class="tiny" id="note_Test_3">Estimated points from Test 3: 52.0 / 52</div>
+      </div>
+    </div>
+
+    <div id="progressGraph" aria-label="Stacked progress bar chart" class="js-plotly-plot"></div>
+
+    <script>
+    (function () {
+      'use strict';
+
+      // ----- Grade cutoffs -----
+      const gradeCutoffs = [
+        { label: 'D',  y: 161 }, { label: 'D+', y: 180 }, { label: 'C-', y: 188 },
+        { label: 'C',  y: 196 }, { label: 'C+', y: 207 }, { label: 'B-', y: 215 },
+        { label: 'B',  y: 223 }, { label: 'B+', y: 234 }, { label: 'A-', y: 242 },
+        { label: 'A',  y: 250 }
+      ];
+      const hasF = true;
+
+      // ----- RR due dates (ISO) -----
+      const RR_DUE_DATES = [
+        '2025-10-20','2025-10-22','2025-10-27','2025-10-29',
+        '2025-11-03','2025-11-10','2025-11-12','2025-11-17',
+        '2025-11-19','2025-11-24','2025-12-01','2025-12-03'
+      ].map(s => new Date(s + 'T00:00:00'));
+
+      function countRemainingRR(today = new Date()){
+        const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        return RR_DUE_DATES.filter(d => d >= t).length;
+      }
+
+      // ----- Assignments (RR computed dynamically) -----
+      const BASE_ASSIGNMENTS = {
+        'Test 1': 52, 'Test 2': 52, 'Test 3': 52,
+        'Labs': 35, 'Presentation': 40, 'General Assignments': 35,
+        'Reading Responses (remaining)': 0, 'Engagement 1': 10, 'Engagement 2': 10
+      };
+      // compute values that depend on the current date or other dynamic rules
+      function getDynamicAssignments(){
+        return {
+          // remaining reading responses (1 pt each)
+          'Reading Responses (remaining)': countRemainingRR(new Date()),
+          // use 6 pts as the numeric "available" amount for Labs (display still shows "out of 35+")
+          'Labs': 6,
+          // make General Assignments use ~20 points numerically for calculations
+          'General Assignments': 20
+        };
+      }
+
+      function getAssignmentsCurrent(){
+        const copy = { ...BASE_ASSIGNMENTS };
+        const dyn = getDynamicAssignments();
+        Object.assign(copy, dyn);
+        return copy;
+      }
+
+      // ----- Colors for assignments -----
+      const palette = ['#d6f9f9','#c2f0e9','#b3e6cc','#b3d9f2','#d1c4e9','#e6ccff','#e6f7d6','#f9e6ff'];
+      const colorMap = {};
+      function colorFor(name){
+        if(!(name in colorMap)){
+          const idx = Object.keys(colorMap).length % palette.length;
+          colorMap[name] = palette[idx];
+        }
+        return colorMap[name];
+      }
+      Object.keys(BASE_ASSIGNMENTS).forEach(colorFor);
+
+      // ----- Grade band colors (F -> A) -----
+      const bandColors = {
+        F:  'rgba(255,120,120,0.5)', D: 'rgba(255,168,120,0.5)', 'D+': 'rgba(255,190,120,0.5)',
+        'C-': 'rgba(255,210,120,0.45)', C: 'rgba(240,225,120,0.45)', 'C+': 'rgba(216,235,140,0.45)',
+        'B-': 'rgba(180,235,160,0.45)', B: 'rgba(150,235,180,0.45)', 'B+': 'rgba(120,235,200,0.45)',
+        'A-': 'rgba(110,220,170,0.45)', A: 'rgba(60,180,120,0.45)'
+      };
+
+      // DOM helpers
+      const $ = sel => document.querySelector(sel);
+      const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+      // ----- UI helpers -----
+      function buildCheckboxes(){
+        const box = $('#checkboxContainer');
+        box.innerHTML = '';
+        const assignments = getAssignmentsCurrent();
+        Object.entries(assignments).forEach(([name, pts]) => {
+          const wrap = document.createElement('label'); wrap.className = 'checkbox';
+          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = (name !== 'Test 1' && name !== 'Test 2' && name !== 'Engagement 1'); cb.dataset.assignment = name; cb.addEventListener('change', () => { window.showCourseDefaultsFlag = false; const btn = document.getElementById('defaultsBtn'); if(btn){ btn.textContent = 'Restore course defaults'; btn.setAttribute('aria-pressed','false'); } updateGraph(); });
+          const swatch = document.createElement('span'); swatch.className = 'swatch'; swatch.style.background = colorFor(name);
+          const labelSpan = document.createElement('span');
+          // special-case display text for Labs and General Assignments
+          if(name === 'Labs'){
+            labelSpan.textContent = ' ' + name + ' (6 pts still available out of 35+)';
+          } else if(name === 'General Assignments'){
+            labelSpan.textContent = ' ' + name + ' (~20 pts still available out of 35)';
+          } else {
+            labelSpan.textContent = ' ' + name + ' (' + pts + ' pts)';
+          }
+          wrap.append(cb, swatch, labelSpan);
+          box.appendChild(wrap);
+        });
+      }
+
+      function refreshCheckboxLabels(){
+        const assignments = getAssignmentsCurrent();
+        $$('#checkboxContainer label.checkbox').forEach(lab => {
+          const name = lab.querySelector('input[type="checkbox"]').dataset.assignment;
+          const span = lab.querySelector('span:last-child');
+          if(name === 'Labs'){
+            span.textContent = ' ' + name + ' (6 pts still available out of 35+)';
+          } else if(name === 'General Assignments'){
+            span.textContent = ' ' + name + ' (~20 pts still available out of 35)';
+          } else {
+            span.textContent = ' ' + name + ' (' + assignments[name] + ' pts)';
+          }
+        });
+      }
+
+      function updateRRStatus(){
+        const remaining = countRemainingRR(new Date());
+        $('#rr_status').textContent = `Reading Responses (remaining): ${remaining} × 1 pt = ${remaining} pts available`;
+      }
+
+      function selectedAssignments(){
+        // If we're in 'show course defaults' mode, return the base maxima
+        if(window.showCourseDefaultsFlag){
+          const out = {};
+          // use BASE_ASSIGNMENTS maxima but set RR potential to 20 and ensure Labs/General use their full maxima
+          Object.entries(BASE_ASSIGNMENTS).forEach(([name, pts]) => {
+            if(name === 'Reading Responses (remaining)') out[name] = 20;
+            else if(name === 'Labs') out[name] = 35;
+            else if(name === 'General Assignments') out[name] = 35;
+            else out[name] = pts;
+          });
+          return out;
+        }
+
+        const assignments = getAssignmentsCurrent();
+        const out = {};
+        $$('#checkboxContainer input[type="checkbox"]').forEach(cb => { if(cb.checked){ out[cb.dataset.assignment] = assignments[cb.dataset.assignment]; } });
+        return out;
+      }
+
+      window.selectAll = function(){ $$('#checkboxContainer input[type="checkbox"]').forEach(cb => cb.checked = true); updateGraph(); };
+      window.clearAll = function(){ window.showCourseDefaultsFlag = false; const btn = document.getElementById('defaultsBtn'); if(btn){ btn.textContent = 'Restore course defaults'; btn.setAttribute('aria-pressed','false'); } $$('#checkboxContainer input[type="checkbox"]').forEach(cb => cb.checked = false); updateGraph(); };
+
+      // show the full course default maxima on the graph (0 earned points)
+      window.showCourseDefaults = function(){
+        const btn = document.getElementById('defaultsBtn');
+        // toggle behavior: if already active, turn off defaults mode
+        if(window.showCourseDefaultsFlag){
+          window.showCourseDefaultsFlag = false;
+          if(btn){ btn.textContent = 'Restore course defaults'; btn.setAttribute('aria-pressed','false'); }
+          // rebuild checkboxes from current dynamic assignments
+          buildCheckboxes();
+          updateTestNotes(); updateGraph();
+          return;
+        }
+
+        // activate defaults mode
+        window.showCourseDefaultsFlag = true;
+        if(btn){ btn.textContent = 'Defaults active — click to revert'; btn.setAttribute('aria-pressed','true'); }
+        // set earned to 0
+        const input = $('#pointsInput'); if(input) input.value = 0;
+        // check the boxes for the standard items we want shown
+        const wanted = new Set(['Test 1','Test 2','Test 3','General Assignments','Reading Responses (remaining)','Labs','Engagement 1','Engagement 2','Presentation']);
+        $$('#checkboxContainer input[type="checkbox"]').forEach(cb => { cb.checked = wanted.has(cb.dataset.assignment); });
+        // ensure test pct inputs reflect '100%'
+        const n3 = document.getElementById('num_Test_3'); if(n3) n3.value = 100;
+        updateTestNotes(); updateGraph();
+      };
+
+      // ----- Tests -----
+      function idOf(prefix, name){ return `${prefix}_${name.replaceAll(' ', '_')}`; }
+      function clamp01(p){ p = isNaN(p) ? 100 : Math.max(0, Math.min(100, p)); return p / 100; }
+      window.syncPct = function(which){
+        const s = document.getElementById(idOf('pct', which));
+        const n = document.getElementById(idOf('num', which));
+        if(s && document.activeElement === s){ if(n) n.value = s.value; }
+        if(n && document.activeElement === n){ if(s) s.value = n.value; }
+        updateTestNotes(); updateGraph();
+      };
+      function getTestPct(name){
+        const el = document.getElementById(idOf('num', name));
+        if(!el) return 1; // default to 100% when the numeric control is commented out
+        return clamp01(parseFloat(el.value));
+      }
+      function updateTestNotes(){
+        const A = getAssignmentsCurrent();
+        const n1 = document.getElementById('note_Test_1');
+        const n2 = document.getElementById('note_Test_2');
+        const n3 = document.getElementById('note_Test_3');
+        if(n1) n1.textContent = `Estimated points from Test 1: ${(A['Test 1'] * getTestPct('Test 1')).toFixed(1)} / ${A['Test 1']}`;
+        if(n2) n2.textContent = `Estimated points from Test 2: ${(A['Test 2'] * getTestPct('Test 2')).toFixed(1)} / ${A['Test 2']}`;
+        if(n3) n3.textContent = `Estimated points from Test 3: ${(A['Test 3'] * getTestPct('Test 3')).toFixed(1)} / ${A['Test 3']}`;
+      }
+
+      // ----- Graph -----
+      function createFigure(earned){
+        const full = getAssignmentsCurrent();
+        const selected = selectedAssignments();
+        const adjusted = {};
+        Object.entries(selected).forEach(([name, pts]) => { adjusted[name] = name.startsWith('Test ') ? pts * getTestPct(name) : pts; });
+
+        // keep the axis large enough to show the full originally-available course points
+        // `full` reflects the current/dynamic assignment values (e.g. Labs may be reduced),
+        // but the axis should show the full base totals so stacked bars don't get visually
+        // cut off when you have potential points beyond the top grade cutoff.
+        // Use a fixed potential value for Reading Responses when sizing the axis
+        // (show up to 20 pts of potential RRs on the axis even if the dynamic
+        // remaining count is lower). This preserves the visual range.
+        const rrPotentialForAxis = 20;
+        const courseTotalBase = Object.values(BASE_ASSIGNMENTS).reduce((a, b) => a + b, 0) + rrPotentialForAxis;
+        const maxCut = Math.max(...gradeCutoffs.map(g => g.y));
+        const AXIS_MAX = Math.max(courseTotalBase, maxCut);
+
+        const data = [];
+        let bottom = 0;
+
+        data.push({ x: ['Progress'], y: [earned], base: bottom, text: ['Earned'], textposition: 'inside', insidetextanchor: 'middle', type: 'bar', marker: { color: 'green' }, hoverinfo: 'skip' });
+        bottom += earned;
+
+        Object.entries(adjusted).forEach(([name, pts]) => {
+          data.push({ x: ['Progress'], y: [pts], base: bottom, text: [name], textposition: 'inside', insidetextanchor: 'middle', type: 'bar', marker: { color: colorFor(name) }, hoverinfo: 'skip' });
+          bottom += pts;
+        });
+
+        const bands = [];
+        if(hasF){ bands.push({ label: 'F', y0: 0, y1: gradeCutoffs[0].y, color: bandColors.F }); }
+        for(let i = 0; i < gradeCutoffs.length; i++){
+          const y0 = gradeCutoffs[i].y;
+          const y1 = (i < gradeCutoffs.length - 1) ? gradeCutoffs[i + 1].y : AXIS_MAX;
+          bands.push({ label: gradeCutoffs[i].label, y0, y1, color: bandColors[gradeCutoffs[i].label] });
+        }
+
+        const shapes = [];
+        bands.forEach(b => { if(b.y1 > b.y0){ shapes.push({ type: 'rect', xref: 'paper', x0: 0.88, x1: 1.0, yref: 'y', y0: b.y0, y1: b.y1, fillcolor: b.color, line: { width: 0 }, layer: 'below' }); } });
+        gradeCutoffs.forEach(g => { shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: g.y, y1: g.y, line: { color: 'black', dash: 'dash', width: 1 }, layer: 'above' }); });
+
+        const annotations = [];
+        if(hasF){ const midF = gradeCutoffs[0].y / 2; annotations.push({ xref: 'paper', x: 1.01, xanchor: 'left', yref: 'y', y: midF, yanchor: 'middle', text: 'F', showarrow: false, font: { size: 16, color: '#111' } }); }
+        for(let i = 0; i < gradeCutoffs.length; i++){
+          const y0 = gradeCutoffs[i].y;
+          const y1 = (i < gradeCutoffs.length - 1) ? gradeCutoffs[i + 1].y : AXIS_MAX;
+          const mid = (y0 + y1) / 2;
+          annotations.push({ xref: 'paper', x: 1.01, xanchor: 'left', yref: 'y', y: mid, yanchor: 'middle', text: gradeCutoffs[i].label, showarrow: false, font: { size: 16, color: '#111' } });
+        }
+
+        const layout = {
+          barmode: 'stack', title: 'Earned + Selected Opportunities with Grade Cutoffs',
+          xaxis: { range: [-0.6, 0.6], showticklabels: false },
+          yaxis: { title: 'Points', range: [0, AXIS_MAX], fixedrange: true },
+          shapes, annotations, showlegend: false, margin: { l: 70, r: 90, t: 60, b: 40 }, hovermode: false
+        };
+
+        return { data, layout, config: { displayModeBar: false } };
+      }
+
+      function updateGraph(){
+        const earned = parseFloat($('#pointsInput').value) || 0;
+        const fig = createFigure(earned);
+        Plotly.newPlot('progressGraph', fig.data, fig.layout, fig.config);
+      }
+
+      function initPage(){
+        const input = $('#pointsInput');
+        if(!input) return;
+        const val = prompt('Enter your total earned points so far:');
+        input.value = (val !== null && val !== '') ? val : (input.value || 0);
+        buildCheckboxes();
+        updateRRStatus();
+        updateTestNotes();
+        updateGraph();
+      }
+
+      // expose a few helpers used by inline handlers
+      window.updateGraph = updateGraph;
+      window.initPage = initPage;
+
+      document.addEventListener('DOMContentLoaded', initPage);
+    })();
+    </script>
+
+<svg id="js-plotly-tester" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" style="position: absolute; left: -10000px; top: -10000px; width: 9000px; height: 9000px; z-index: 1;"><path class="js-reference-point" d="M0,0H1V1H0Z" style="stroke-width: 0; fill: black;"></path></svg></body></html>
