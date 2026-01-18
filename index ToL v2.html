@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<!-- saved from url=(0077)file:///C:/Users/jcooper2/Downloads/progress_auto_rr_taller_labels%20(1).html -->
+
+<!--  TO DO: add code that makes the test boxes blank (and not 200/200) once test date passed*-->
+
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Course Progress (Auto RR=1pt + Taller + Labels)</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style id="plotly.js-style-global"></style>
+  <style>
+    html, body { max-width: 100%; overflow-x: hidden; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding: 16px; }
+    .controls-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px 20px; }
+    .row { margin: 8px 0; }
+    .tiny { font-size: 12px; color: #555; }
+    fieldset { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; }
+    legend { padding: 0 6px; }
+    .btns { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ccc; background: #f6f6f6; cursor: pointer; }
+    button:hover { background: #eee; }
+    /* Taller graph area: more vertical inches, same zoom */
+    #progressGraph { width: 560px; height: 1100px; max-width: 100%; }
+    label.checkbox { display: flex; align-items: flex-start; gap: 8px; white-space: normal; }
+    input[type="checkbox"] { transform: scale(1.15); margin-top: 2px; }
+    input[type="number"] { width: 60px; padding: 6px; }
+    input[type="range"] { width: 160px; }
+    .inline { display: inline-flex; align-items: center; gap: 8px; }
+    .swatch { display:inline-block; width:14px; height:14px; border:1px solid #999; }
+    .assignment-input-container { border-left: 3px solid; padding-left: 12px; padding-bottom: 8px; }
+    .assignment-label { display: block; margin-bottom: 4px; font-weight: 600; }
+    .assignment-input-wrapper { display: flex; gap: 8px; align-items: center; }
+  </style>
+</head>
+<body>
+  <h2>Course Progress - Predict your Grade</h2>
+  <p>Use the boxes below to enter your earned points and predict your percentages on upcoming assignments. The total and graph will update automatically.</p>
+  <p>Enter a grade of 0 if the points are already included in the 'earned points' from Canvas.</p>
+  <p>Scroll down to see the total projected points and a graphical display of your choices.</p>
+  <div class="row" style="display: flex; gap: 16px; align-items: center;">
+    <div>
+      <label for="pointsInput">Enter your earned points from Canvas:</label>
+      <input type="number" id="pointsInput" min="0" step="1" oninput="updateGraph()">
+    </div>
+    <button type="button" id="defaultsBtn" aria-pressed="false" onclick="showCourseDefaults()">Restore course defaults</button>
+  </div>
+
+  <fieldset>
+    <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">Predict Percentages on Required Coursework</div>
+    <div class="controls-grid" id="inputContainer"></div>
+    <div class="tiny" id="categorySum" style="margin-bottom: 12px;"></div>
+    <div class="tiny" id="accuracyWarning" style="font-size: 16px; margin-bottom: 8px; color: #d9534f; display: none;">Warning: The grade indicated on the graph may be inaccurate. Please adjust your choices; see Prof Cooper with questions.</div>
+    <div class="tiny" id="pointsWarning" style="font-size: 16px; margin-bottom: 8px; color: #d9534f; display: none;">--> Your point total for Flexible Choices is above 400. Only 400 points can be counted towards your grade.</div>
+    <div class="tiny" id="countWarning" style="font-size: 16px; margin-bottom: 8px; color: #d9534f; display: none;"> --> You have selected more than 6 Flexible Choice items. Only 6 items can count towards your grade.</div>
+    <!-- <div class="tiny" id="rr_status">Practices (remaining): 0 × 4 pts = 0 pts available</div> -->
+  </fieldset>
+
+  <div id="totalPoints" style="font-size: 18px; font-weight: 600; margin-top: 16px; margin-bottom: 12px; color: #2c5aa0;"></div>
+  <div id="progressGraph" aria-label="Stacked progress bar chart" class="js-plotly-plot"></div>
+
+    <script>
+    (function () {
+      'use strict';
+
+      // ----- Grade cutoffs -----
+      const gradeCutoffs = [
+        { label: 'D',  y: 595 }, { label: 'D+', y: 665 }, { label: 'C-', y: 695 },
+        { label: 'C',  y: 725 }, { label: 'C+', y: 765 }, { label: 'B-', y: 795 },
+        { label: 'B',  y: 825 }, { label: 'B+', y: 865 }, { label: 'A-', y: 895 },
+        { label: 'A',  y: 925 }
+      ];
+      const hasF = true;
+
+      // ----- RR due dates (ISO) -----
+      const RR_DUE_DATES = [
+'2026-01-20','2026-01-22','2026-01-27','2026-01-29',
+'2026-02-03','2026-02-05','2026-02-10','2026-02-12',
+'2026-02-17','2026-02-19','2026-02-24','2026-02-26',
+'2026-03-03','2026-03-05',
+'2026-03-17','2026-03-19','2026-03-24','2026-03-26',
+'2026-03-31','2026-04-07','2026-04-09',
+'2026-04-14','2026-04-16','2026-04-21','2026-04-23',
+'2026-04-28','2026-04-30'
+  ].map(s => new Date(s + 'T00:00:00'));
+
+      function countRemainingRR(today = new Date()){
+        const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        return RR_DUE_DATES.filter(d => d >= t).length;
+      }
+
+      // ----- Assignments (RR computed dynamically) -----
+      const BASE_ASSIGNMENTS = {
+        'Test 1': 150, 'Test 2': 150, 'Test 3': 150, 'Test 4': 150,
+        'Engagement 1': 30, 'Engagement 2': 30,
+        'Article Presentation (Unit 1)': 120, 'Article Presentation 2': 120, 
+        'Classical Lab': 80, 'Operant Lab': 80, 'Complex Classical Lab': 60,
+        'Classical Application': 60, 'Operant Application': 60, 'QRRs': 60
+      };
+
+      // compute values that depend on the current date or other dynamic rules
+      function getDynamicAssignments(){
+        return {
+          // QRRs points based on remaining RR dates (3 pts each)
+          'QRRs': countRemainingRR(new Date())*3
+        };
+      }
+
+      function getAssignmentsCurrent(){
+        const copy = { ...BASE_ASSIGNMENTS };
+        const dyn = getDynamicAssignments();
+        Object.assign(copy, dyn);
+        return copy;
+      }
+
+      // ----- Colors for assignments -----
+      const palette = ['#FABE0F','#FABE0F','#FABE0F','#FABE0F', '#FFE59A', '#FFE59A', 
+      '#8FABDC', '#8FABDC', 
+      '#BFD4EA','#BFD4EA', '#BFD4EA', 
+      '#D9E6F2', '#D9E6F2','#ECF3F9'];
+      const colorMap = {};
+      function colorFor(name){
+        if(!(name in colorMap)){
+          if(name.startsWith('Engagement')){
+            colorMap[name] = '#FFE59A';
+          } else {
+            const idx = Object.keys(colorMap).length % palette.length;
+            colorMap[name] = palette[idx];
+          }
+        }
+        return colorMap[name];
+      }
+      Object.keys(BASE_ASSIGNMENTS).forEach(colorFor);
+
+      // ----- Grade band colors (F -> A) -----
+      const bandColors = {
+        F:  'rgba(255,120,120,0.5)', D: 'rgba(255,168,120,0.5)', 'D+': 'rgba(255,190,120,0.5)',
+        'C-': 'rgba(255,210,120,0.45)', C: 'rgba(240,225,120,0.45)', 'C+': 'rgba(216,235,140,0.45)',
+        'B-': 'rgba(180,235,160,0.45)', B: 'rgba(150,235,180,0.45)', 'B+': 'rgba(120,235,200,0.45)',
+        'A-': 'rgba(110,220,170,0.45)', A: 'rgba(60,180,120,0.45)'
+      };
+
+      // DOM helpers
+      const $ = sel => document.querySelector(sel);
+      const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+      // ----- UI helpers -----
+      function buildInputFields(){
+        const box = $('#inputContainer');
+        box.innerHTML = '';
+        const assignments = getAssignmentsCurrent();
+        
+        // Separate tests and engagement from other assignments
+        const tests = [];
+        const engagement = [];
+        const articles = [];
+        const labs = [];
+        const applications = [];
+        const qrrs = [];
+        
+        Object.entries(assignments).forEach(([name, pts]) => {
+          if(name.startsWith('Test')) tests.push([name, pts]);
+          else if(name.startsWith('Engagement')) engagement.push([name, pts]);
+          else if(name.startsWith('Article')) articles.push([name, pts]);
+          else if(name.includes('Lab')) labs.push([name, pts]);
+          else if(name.includes('Application')) applications.push([name, pts]);
+          else if(name === 'QRRs') qrrs.push([name, pts]);
+        });
+        
+        // Create tests row
+        if(tests.length > 0){
+          const testsRow = document.createElement('div');
+          testsRow.className = 'assignment-row';
+          testsRow.style.display = 'grid';
+          testsRow.style.gridTemplateColumns = 'repeat(auto-fit, minmax(260px, 1fr))';
+          testsRow.style.gap = '12px 20px';
+          testsRow.style.marginBottom = '8px';
+          
+          tests.forEach(([name, pts]) => {
+            const container = createAssignmentField(name, pts);
+            testsRow.appendChild(container);
+          });
+          
+          box.appendChild(testsRow);
+        }
+        
+        // Create engagement row
+        if(engagement.length > 0){
+          const engRow = document.createElement('div');
+          engRow.className = 'assignment-row';
+          engRow.style.display = 'grid';
+          engRow.style.gridTemplateColumns = 'repeat(auto-fit, minmax(260px, 1fr))';
+          engRow.style.gap = '12px 20px';
+          engRow.style.marginBottom = '16px';
+          
+          engagement.forEach(([name, pts]) => {
+            const container = createAssignmentField(name, pts);
+            engRow.appendChild(container);
+          });
+          
+          box.appendChild(engRow);
+        }
+        
+        // Create divider section
+        const dividerSection = document.createElement('div');
+        dividerSection.style.gridColumn = '1 / -1';
+        dividerSection.style.marginTop = '16px';
+        
+        const divider = document.createElement('div');
+        divider.style.borderTop = '1px solid #999';
+        divider.style.margin = '0 0 8px 0';
+        
+        const label = document.createElement('div');
+        label.textContent = 'Flexible Work Choices';
+        label.style.fontSize = '18px';
+        label.style.fontWeight = '600';
+        label.style.marginBottom = '8px';
+        divider.appendChild(label);
+        
+        const subtitle = document.createElement('div');
+        subtitle.textContent = 'Most students will complete 4; choose a maximum of 6.';
+        subtitle.style.fontSize = '12px';
+        subtitle.style.color = '#777';
+        subtitle.style.marginBottom = '12px';
+        
+        dividerSection.appendChild(divider);
+        dividerSection.appendChild(subtitle);
+        box.appendChild(dividerSection);
+        
+        // Create other assignments with checkboxes in 4 columns
+        const othersDiv = document.createElement('div');
+        othersDiv.style.gridColumn = '1 / -1';
+        othersDiv.style.display = 'grid';
+        othersDiv.style.gridTemplateColumns = 'repeat(4, minmax(260px, 1fr))';
+        othersDiv.style.gap = '12px 20px';
+        
+        const categories = [
+          { name: 'Article Presentations', items: articles },
+          { name: 'Labs', items: labs },
+          { name: 'Application Presentations', items: applications },
+          { name: 'QRRs', items: qrrs }
+        ];
+        
+        categories.forEach(category => {
+          const column = document.createElement('div');
+          column.style.display = 'flex';
+          column.style.flexDirection = 'column';
+          column.style.gap = '12px';
+          
+          const header = document.createElement('div');
+          header.textContent = category.name;
+          header.style.fontWeight = '600';
+          header.style.borderBottom = '1px solid #ddd';
+          header.style.paddingBottom = '6px';
+          column.appendChild(header);
+          
+          category.items.forEach(([name, pts]) => {
+            const container = createAssignmentFieldWithCheckbox(name, pts);
+            column.appendChild(container);
+          });
+          
+          othersDiv.appendChild(column);
+        });
+        
+        box.appendChild(othersDiv);
+      }
+      
+      function createAssignmentField(name, pts){
+        const container = document.createElement('div');
+        container.className = 'assignment-input-container';
+        container.style.borderLeftColor = colorFor(name);
+        
+        const label = document.createElement('label');
+        label.textContent = name;
+        label.className = 'assignment-label';
+        
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '100';
+        input.step = '1';
+        input.value = '100';
+        input.dataset.assignment = name;
+        input.placeholder = '100';
+        input.oninput = onAssignmentInputChange;
+        
+        const swatch = document.createElement('span');
+        swatch.className = 'swatch';
+        swatch.style.background = colorFor(name);
+        
+        const inputWrapper = document.createElement('div');
+        inputWrapper.className = 'assignment-input-wrapper';
+        inputWrapper.append(swatch, input, document.createTextNode('%'));
+        
+        container.append(label, inputWrapper);
+        
+        const isPractice = name === 'QRRs';
+        const noteEl = document.createElement('div');
+        noteEl.className = 'tiny';
+        noteEl.id = `note_${name.replace(/\s+/g, '_')}`;
+        if(isPractice){
+          noteEl.innerHTML = `Predicted Pts: ${pts} /<br>${countRemainingRR(new Date())} remaining @ 3 pts each`;
+        } else {
+          noteEl.textContent = `Predicted Pts: ${pts} / ${pts}`;
+        }
+        container.append(noteEl);
+        
+        return container;
+      }
+      
+      function createAssignmentFieldWithCheckbox(name, pts){
+        const container = document.createElement('div');
+        container.className = 'assignment-input-container';
+        container.style.borderLeftColor = colorFor(name);
+        
+        const label = document.createElement('label');
+        label.textContent = name;
+        label.className = 'assignment-label';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkbox.style.width = '16px';
+        checkbox.style.height = '16px';
+        checkbox.style.marginRight = '6px';
+        checkbox.dataset.assignment = name;
+        checkbox.onchange = function(){
+          const input = container.querySelector('input[type="number"]');
+          if(!this.checked){
+            input.value = '';
+          } else {
+            input.value = '100';
+          }
+          onAssignmentInputChange();
+        };
+        
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '100';
+        input.step = '1';
+        input.value = '100';
+        input.dataset.assignment = name;
+        input.placeholder = '100';
+        input.oninput = onAssignmentInputChange;
+        
+        const swatch = document.createElement('span');
+        swatch.className = 'swatch';
+        swatch.style.background = colorFor(name);
+        
+        const inputWrapper = document.createElement('div');
+        inputWrapper.className = 'assignment-input-wrapper';
+        inputWrapper.append(checkbox, swatch, input, document.createTextNode('%'));
+        
+        container.append(label, inputWrapper);
+        
+        const isPractice = name === 'QRRs';
+        const noteEl = document.createElement('div');
+        noteEl.className = 'tiny';
+        noteEl.id = `note_${name.replace(/\s+/g, '_')}`;
+        if(isPractice){
+          noteEl.innerHTML = `Predicted Pts: ${pts} /<br>${countRemainingRR(new Date())} remaining @ 3 pts each`;
+        } else {
+          noteEl.textContent = `Predicted Pts: ${pts} / ${pts}`;
+        }
+        container.append(noteEl);
+        
+        return container;
+      }
+
+      function onAssignmentInputChange(){
+        window.showCourseDefaultsFlag = false;
+        const btn = document.getElementById('defaultsBtn');
+        if(btn){ btn.textContent = 'Restore course defaults'; btn.setAttribute('aria-pressed','false'); }
+        updateAssignmentNotes();
+        updateGraph();
+      }
+
+      function updateAssignmentNotes(){
+        const full = getAssignmentsCurrent();
+        $$('#inputContainer input[type="number"]').forEach(inp => {
+          const pct = getAssignmentPct(inp.dataset.assignment);
+          const noteEl = document.getElementById(`note_${inp.dataset.assignment.replace(/\s+/g, '_')}`);
+          if(noteEl){
+            const pts = full[inp.dataset.assignment];
+            const isPractice = inp.dataset.assignment === 'QRRs';
+            const predicted = (pts * pct).toFixed(1);
+            if(isPractice){
+              noteEl.innerHTML = `Enter the % of the remaining QRRs you will complete.<br>Predicted Pts: ${predicted} /<br>${countRemainingRR(new Date())} upcoming @ 3 pts each`;
+            } else {
+              noteEl.textContent = `Predicted Pts: ${predicted} / ${pts}`;
+            }
+          }
+        });
+        updateCategorySum();
+      }
+
+      function updateCategorySum(){
+        const selected = selectedAssignments();
+        const categoryNames = ['Article Presentation (Unit 1)', 'Article Presentation 2', 'Classical Lab', 'Operant Lab', 'Complex Classical Lab', 'Classical Application', 'Operant Application', 'QRRs'];
+        let total = 0;
+        let count = 0;
+        
+        categoryNames.forEach(name => {
+          if(selected[name] !== undefined && selected[name] > 0){
+            total += selected[name];
+            count++;
+          }
+        });
+        
+        const sumEl = document.getElementById('categorySum');
+        if(sumEl){
+          sumEl.textContent = `Article Presentations, Labs, Application Presentations, & QRRs Subtotal: ${total.toFixed(1)} pts`;
+        }
+        
+        // Show/hide warnings
+        const pointsAbove400 = total > 400;
+        const countAbove6 = count > 6;
+        
+        const accuracyWarning = document.getElementById('accuracyWarning');
+        const pointsWarning = document.getElementById('pointsWarning');
+        const countWarning = document.getElementById('countWarning');
+        
+        if(accuracyWarning){
+          accuracyWarning.style.display = (pointsAbove400 || countAbove6) ? 'block' : 'none';
+        }
+        if(pointsWarning){
+          pointsWarning.style.display = pointsAbove400 ? 'block' : 'none';
+        }
+        if(countWarning){
+          countWarning.style.display = countAbove6 ? 'block' : 'none';
+        }
+      }
+
+      function updateRRStatus(){
+        const remaining = countRemainingRR(new Date());
+        //$('#rr_status').textContent = `Practices (remaining): ${remaining} × 4 pts = ${remaining * 4} pts available`;
+      }
+
+      function getAssignmentPct(name){
+        const inputs = $$('#inputContainer input[type="number"]');
+        for(let inp of inputs){
+          if(inp.dataset.assignment === name){
+            const val = parseFloat(inp.value);
+            return isNaN(val) || inp.value.trim() === '' ? 0 : Math.max(0, Math.min(100, val)) / 100;
+          }
+        }
+        return 0;
+      }
+
+      function selectedAssignments(){
+        const out = {};
+        const full = getAssignmentsCurrent();
+        $$('#inputContainer input[type="number"]').forEach(input => {
+          const pct = getAssignmentPct(input.dataset.assignment);
+          out[input.dataset.assignment] = full[input.dataset.assignment] * pct;
+        });
+        return out;
+      }
+
+      // restore course default values
+      window.showCourseDefaults = function(){
+        const btn = document.getElementById('defaultsBtn');
+        // set earned to 0
+        const input = $('#pointsInput'); if(input) input.value = 0;
+        // reset all input fields to 100%
+        $$('#inputContainer input[type="number"]').forEach(inp => {
+          inp.value = '100';
+        });
+        // recheck all checkboxes
+        $$('#inputContainer input[type="checkbox"]').forEach(checkbox => {
+          checkbox.checked = true;
+        });
+        updateAssignmentNotes(); updateGraph();
+      };
+
+      // ----- Graph -----
+      function createFigure(earned){
+        const full = getAssignmentsCurrent();
+        const selected = selectedAssignments();
+        const adjusted = {};
+        Object.entries(selected).forEach(([name, pts]) => { adjusted[name] = pts; });
+
+        const rrPotentialForAxis = 20;
+        const courseTotalBase = Object.values(BASE_ASSIGNMENTS).reduce((a, b) => a + b, 0) + rrPotentialForAxis;
+        const maxCut = Math.max(...gradeCutoffs.map(g => g.y));
+        const AXIS_MAX = Math.max(courseTotalBase, maxCut);
+
+        const data = [];
+        let bottom = 0;
+
+        data.push({ x: ['Progress'], y: [earned], base: bottom, text: ['Earned'], textposition: 'inside', insidetextanchor: 'middle', type: 'bar', marker: { color: 'green', line: { color: 'white', width: 1 } }, hoverinfo: 'skip' });
+        bottom += earned;
+
+        Object.entries(adjusted).forEach(([name, pts]) => {
+          data.push({ x: ['Progress'], y: [pts], base: bottom, text: [name], textposition: 'inside', insidetextanchor: 'middle', type: 'bar', marker: { color: colorFor(name), line: { color: 'white', width: 1 } }, hoverinfo: 'skip' });
+          bottom += pts;
+        });
+
+        const bands = [];
+        if(hasF){ bands.push({ label: 'F', y0: 0, y1: gradeCutoffs[0].y, color: bandColors.F }); }
+        for(let i = 0; i < gradeCutoffs.length; i++){
+          const y0 = gradeCutoffs[i].y;
+          const y1 = (i < gradeCutoffs.length - 1) ? gradeCutoffs[i + 1].y : AXIS_MAX;
+          bands.push({ label: gradeCutoffs[i].label, y0, y1, color: bandColors[gradeCutoffs[i].label] });
+        }
+
+        const shapes = [];
+        bands.forEach(b => { if(b.y1 > b.y0){ shapes.push({ type: 'rect', xref: 'paper', x0: 0.88, x1: 1.0, yref: 'y', y0: b.y0, y1: b.y1, fillcolor: b.color, line: { width: 0 }, layer: 'below' }); } });
+        gradeCutoffs.forEach(g => { shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: g.y, y1: g.y, line: { color: 'rgba(0,0,0,0.4)', dash: 'dash', width: 1 }, layer: 'above' }); });
+
+        const annotations = [];
+        if(hasF){ const midF = gradeCutoffs[0].y / 2; annotations.push({ xref: 'paper', x: 1.01, xanchor: 'left', yref: 'y', y: midF, yanchor: 'middle', text: 'F', showarrow: false, font: { size: 16, color: '#111' } }); }
+        for(let i = 0; i < gradeCutoffs.length; i++){
+          const y0 = gradeCutoffs[i].y;
+          const y1 = (i < gradeCutoffs.length - 1) ? gradeCutoffs[i + 1].y : AXIS_MAX;
+          const mid = (y0 + y1) / 2;
+          annotations.push({ xref: 'paper', x: 1.01, xanchor: 'left', yref: 'y', y: mid, yanchor: 'middle', text: gradeCutoffs[i].label, showarrow: false, font: { size: 16, color: '#111' } });
+        }
+
+        const layout = {
+          barmode: 'stack', title: 'Earned + Predicted Future Points with Grade Cutoffs',
+          xaxis: { range: [-0.6, 0.6], showticklabels: false },
+          yaxis: { title: 'Points', range: [0, AXIS_MAX], fixedrange: true },
+          shapes, annotations, showlegend: false, margin: { l: 70, r: 90, t: 60, b: 40 }, hovermode: false
+        };
+
+        return { data, layout, config: { displayModeBar: false } };
+      }
+
+      function updateGraph(){
+        const earned = parseFloat($('#pointsInput').value) || 0;
+        const selected = selectedAssignments();
+        const selectedTotal = Object.values(selected).reduce((a, b) => a + b, 0);
+        const total = earned + selectedTotal;
+        
+        const fig = createFigure(earned);
+        Plotly.newPlot('progressGraph', fig.data, fig.layout, fig.config);
+        
+        const totalEl = document.getElementById('totalPoints');
+        if(totalEl){
+          totalEl.textContent = `Your total based on above choices: ${total.toFixed(1)} points`;
+        }
+      }
+
+      function initPage(){
+        const input = $('#pointsInput');
+        if(!input) return;
+        //const val = prompt('Enter your total earned points so far:');
+        //input.value = (val !== null && val !== '') ? val : (input.value || 0);
+        buildInputFields();
+        updateRRStatus();
+        updateAssignmentNotes();
+        updateGraph();
+      }
+
+      // expose a few helpers used by inline handlers
+      window.updateGraph = updateGraph;
+      window.initPage = initPage;
+
+      document.addEventListener('DOMContentLoaded', initPage);
+    })();
+    </script>
+
+<svg id="js-plotly-tester" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" style="position: absolute; left: -10000px; top: -10000px; width: 9000px; height: 9000px; z-index: 1;"><path class="js-reference-point" d="M0,0H1V1H0Z" style="stroke-width: 0; fill: black;"></path></svg></body></html>
