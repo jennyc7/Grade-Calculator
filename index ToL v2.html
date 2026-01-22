@@ -36,8 +36,12 @@
 <body>
   <h2>Course Progress - Predict your Grade</h2>
   <p>Use the boxes below to enter your earned points and predict your percentages on upcoming assignments. The total and graph will update automatically.</p>
-  <p>Enter a grade of 0 if the points are already included in the 'earned points' from Canvas.</p>
-  <p>Scroll down to see the total projected points and a graphical display of your choices.</p>
+  <p>You have two ways to use this page: </p>
+  <ol>
+    <li>enter your earned points from Canvas below and then uncheck individual assignments that were already included in that total (exception: QRRs) OR </li>
+    <li>enter past and projected percentages on all assignments you will be doing.</li>
+  </ol>
+  <p>Scroll down to see the total projected points and a graphical display of your selections.</p>
   <div class="row" style="display: flex; gap: 16px; align-items: center;">
     <div>
       <label for="pointsInput">Enter your earned points from Canvas:</label>
@@ -50,14 +54,15 @@
     <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">Predict Percentages on Required Coursework</div>
     <div class="controls-grid" id="inputContainer"></div>
     <div class="tiny" id="categorySum" style="margin-bottom: 12px;"></div>
-    <div class="tiny" id="accuracyWarning" style="font-size: 16px; margin-bottom: 8px; color: #d9534f; display: none;">Warning: The grade indicated on the graph may be inaccurate. Please adjust your choices; see Prof Cooper with questions.</div>
-    <div class="tiny" id="pointsWarning" style="font-size: 16px; margin-bottom: 8px; color: #d9534f; display: none;">--> Your point total for Flexible Choices is above 400. Only 400 points can be counted towards your grade.</div>
-    <div class="tiny" id="countWarning" style="font-size: 16px; margin-bottom: 8px; color: #d9534f; display: none;"> --> You have selected more than 6 Flexible Choice items. Only 6 items can count towards your grade.</div>
+    <div class="tiny" id="accuracyWarning" style="font-size: 16px; margin-bottom: 8px; color: #d9534f; display: none;">Warning: The grade indicated on the graph may be inaccurate. See Prof Cooper with questions.</div>
+    <div class="tiny" id="pointsWarning" style="font-size: 16px; margin-bottom: 8px; color: #d9534f; display: none;">--> Your point total for Flexible Choices is above 400. The excess has been subtracted from the total points shown on the graph.</div>
+    <div class="tiny" id="countWarning" style="font-size: 16px; margin-bottom: 8px; color: #d9534f; display: none;"> --> You have selected more than 6 Flexible Choice items. Only 6 items can count towards your grade. Please adjust your choices.</div>
     <!-- <div class="tiny" id="rr_status">Practices (remaining): 0 × 4 pts = 0 pts available</div> -->
   </fieldset>
 
-  <div id="totalPoints" style="font-size: 18px; font-weight: 600; margin-top: 16px; margin-bottom: 12px; color: #2c5aa0;"></div>
+  <div id="totalPoints" style="font-size: 18px; font-weight: 600; margin-top: 16px; margin-bottom: 12px; color: #2c5aa0;"></div>projected) points earned has been adjusted to reflect that.</div>
   <div id="progressGraph" aria-label="Stacked progress bar chart" class="js-plotly-plot"></div>
+  <div id="adjustmentMessage" style="font-size: 14px; margin-bottom: 12px; color: #d9534f; display: none;">Only 400 of the flexible points can contribute to your grade, and the projected total points and "Current Grade" line total has been adjusted to reflect that.</div>
 
     <script>
     (function () {
@@ -218,7 +223,7 @@
         divider.appendChild(label);
         
         const subtitle = document.createElement('div');
-        subtitle.textContent = 'Most students will complete 4 or 5; choose a maximum of 6. A traditional grading scheme would have 340 points being 100%.';
+        subtitle.textContent = 'Most students will complete 4 or 5; choose a maximum of 6. A traditional grading scheme would have 340 points being 100%. A maximum of 400 points from flexible choices can be counted toward your grade.';
         subtitle.style.fontSize = '12px';
         subtitle.style.color = '#777';
         subtitle.style.marginBottom = '12px';
@@ -274,6 +279,23 @@
         label.textContent = name;
         label.className = 'assignment-label';
         
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkbox.style.width = '16px';
+        checkbox.style.height = '16px';
+        checkbox.style.marginRight = '6px';
+        checkbox.dataset.assignment = name;
+        checkbox.onchange = function(){
+          const input = container.querySelector('input[type="number"]');
+          if(!this.checked){
+            input.value = '';
+          } else {
+            input.value = '100';
+          }
+          onAssignmentInputChange();
+        };
+        
         const input = document.createElement('input');
         input.type = 'number';
         input.min = '0';
@@ -290,7 +312,7 @@
         
         const inputWrapper = document.createElement('div');
         inputWrapper.className = 'assignment-input-wrapper';
-        inputWrapper.append(swatch, input, document.createTextNode('%'));
+        inputWrapper.append(checkbox, swatch, input, document.createTextNode('%'));
         
         container.append(label, inputWrapper);
         
@@ -430,6 +452,9 @@
         if(countWarning){
           countWarning.style.display = countAbove6 ? 'block' : 'none';
         }
+        
+        // Store the flexible points total for use in updateGraph
+        window.flexiblePointsTotal = total;
       }
 
       function updateRRStatus(){
@@ -475,7 +500,7 @@
       };
 
       // ----- Graph -----
-      function createFigure(earned){
+      function createFigure(earned, adjustedTotal){
         const full = getAssignmentsCurrent();
         const selected = selectedAssignments();
         const adjusted = {};
@@ -508,6 +533,11 @@
         const shapes = [];
         bands.forEach(b => { if(b.y1 > b.y0){ shapes.push({ type: 'rect', xref: 'paper', x0: 0.88, x1: 1.0, yref: 'y', y0: b.y0, y1: b.y1, fillcolor: b.color, line: { width: 0 }, layer: 'below' }); } });
         gradeCutoffs.forEach(g => { shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: g.y, y1: g.y, line: { color: 'rgba(0,0,0,0.4)', dash: 'dash', width: 1 }, layer: 'above' }); });
+        
+        // Add horizontal line for adjusted total
+        if(adjustedTotal !== undefined && adjustedTotal > 0){
+          shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 0.88, yref: 'y', y0: adjustedTotal, y1: adjustedTotal, line: { color: '#d9534f', width: 3 }, layer: 'above' });
+        }
 
         const annotations = [];
         if(hasF){ const midF = gradeCutoffs[0].y / 2; annotations.push({ xref: 'paper', x: 1.01, xanchor: 'left', yref: 'y', y: midF, yanchor: 'middle', text: 'F', showarrow: false, font: { size: 16, color: '#111' } }); }
@@ -516,6 +546,11 @@
           const y1 = (i < gradeCutoffs.length - 1) ? gradeCutoffs[i + 1].y : AXIS_MAX;
           const mid = (y0 + y1) / 2;
           annotations.push({ xref: 'paper', x: 1.01, xanchor: 'left', yref: 'y', y: mid, yanchor: 'middle', text: gradeCutoffs[i].label, showarrow: false, font: { size: 16, color: '#111' } });
+        }
+        
+        // Add label for current grade line
+        if(adjustedTotal !== undefined && adjustedTotal > 0){
+          annotations.push({ xref: 'paper', x: 0.02, xanchor: 'left', yref: 'y', y: adjustedTotal, yanchor: 'middle', text: 'Current Grade', showarrow: false, font: { size: 12, color: '#d9534f' }, bgcolor: 'rgba(255,255,255,0.8)', bordercolor: '#d9534f', borderwidth: 1, borderpad: 4 });
         }
 
         const layout = {
@@ -532,14 +567,24 @@
         const earned = parseFloat($('#pointsInput').value) || 0;
         const selected = selectedAssignments();
         const selectedTotal = Object.values(selected).reduce((a, b) => a + b, 0);
-        const total = earned + selectedTotal;
+        let total = earned + selectedTotal;
         
-        const fig = createFigure(earned);
+        // Check if flexible points exceed 400
+        const flexibleTotal = window.flexiblePointsTotal || 0;
+        const excessPoints = flexibleTotal > 400 ? flexibleTotal - 400 : 0;
+        const adjustedTotal = total - excessPoints;
+        
+        const fig = createFigure(earned, adjustedTotal);
         Plotly.newPlot('progressGraph', fig.data, fig.layout, fig.config);
         
         const totalEl = document.getElementById('totalPoints');
         if(totalEl){
-          totalEl.textContent = `Your total based on above choices: ${total.toFixed(1)} points`;
+          totalEl.textContent = `Your total based on above choices: ${adjustedTotal.toFixed(1)} points`;
+        }
+        
+        const adjustmentMsg = document.getElementById('adjustmentMessage');
+        if(adjustmentMsg){
+          adjustmentMsg.style.display = excessPoints > 0 ? 'block' : 'none';
         }
       }
 
